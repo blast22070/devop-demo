@@ -1,0 +1,79 @@
+trigger:
+- master
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  azureSubscription: 'YOUR-SERVICE-CONNECTION'
+  appName: 'YOUR-APP-SERVICE-NAME'
+
+stages:
+
+# =========================
+# ✅ BUILD STAGE
+# =========================
+- stage: Build
+  displayName: Build Stage
+  jobs:
+  - job: BuildJob
+    steps:
+
+    - task: Maven@3
+      displayName: Build with Maven
+      inputs:
+        mavenPomFile: 'pom.xml'
+        mavenOptions: '-Xmx3072m'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.11'
+        jdkArchitectureOption: 'x64'
+        goals: 'clean package'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+
+    # ✅ Copy WAR file
+    - task: CopyFiles@2
+      displayName: Copy WAR file
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)/target'
+        Contents: '*.war'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    # ✅ Publish Artifact
+    - task: PublishBuildArtifacts@1
+      displayName: Publish Artifact
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+
+# =========================
+# ✅ DEPLOY STAGE
+# =========================
+- stage: Deploy
+  displayName: Deploy Stage
+  dependsOn: Build
+  jobs:
+  - deployment: DeployWeb
+    environment: 'production'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+
+          # ✅ Download artifact
+          - task: DownloadBuildArtifacts@0
+            displayName: Download Artifact
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'drop'
+              downloadPath: '$(System.DefaultWorkingDirectory)'
+
+          # ✅ Deploy to Azure App Service
+          - task: AzureWebApp@1
+            displayName: Deploy to Azure App Service
+            inputs:
+              azureSubscription: '$(azureSubscription)'
+              appName: '$(appName)'
+              package: '$(System.DefaultWorkingDirectory)/drop/*.war'
